@@ -1,10 +1,9 @@
-import BinaryFileManagerPlugin from 'main';
+import AttachmentNotesPlugin from 'main';
 import {
 	App,
 	normalizePath,
 	TAbstractFile,
 	TFile,
-	moment,
 	Notice,
 	Plugin,
 } from 'obsidian';
@@ -12,10 +11,12 @@ import { UncoveredApp } from 'Uncover';
 import { retry } from 'Util';
 
 const TEMPLATER_PLUGIN_NAME = 'templater-obsidian';
-const DEFAULT_TEMPLATE_CONTENT = `![[{{PATH}}]]
-LINK: [[{{PATH}}]]
-CREATED At: {{CDATE:YYYY-MM-DD}}
-FILE TYPE: {{EXTENSION:UP}}
+const DEFAULT_TEMPLATE_CONTENT = `---
+file created: {{CDATE:YYYY-MM-DDTHH:mm}}
+file format: {{EXTENSION:LOW}}
+link: "[[{{PATH}}]]"
+---
+![[{{PATH}}]]
 `;
 
 const RETRY_NUMBER = 1000;
@@ -23,14 +24,14 @@ const TIMEOUT_MILLISECOND = 1000;
 
 export class MetaDataGenerator {
 	private app: App;
-	private plugin: BinaryFileManagerPlugin;
+	private plugin: AttachmentNotesPlugin;
 
-	constructor(app: App, plugin: BinaryFileManagerPlugin) {
+	constructor(app: App, plugin: AttachmentNotesPlugin) {
 		this.app = app;
 		this.plugin = plugin;
 	}
 
-	async shouldCreateMetaDataFile(file: TAbstractFile): Promise<boolean> {
+	shouldCreateMetaDataFile(file: TAbstractFile): boolean {
 		if (!(file instanceof TFile)) {
 			return false;
 		}
@@ -41,42 +42,62 @@ export class MetaDataGenerator {
 			return false;
 		}
 
-		if (this.plugin.fileListAdapter.has(file.path)) {
+		if (this.plugin.fileListAdapter.has(file)) {
 			return false;
 		}
 
 		return true;
 	}
 
-	async create(file: TFile) {
+	async create(file: TFile): Promise<string> {
 		const metaDataFileName = this.uniquefyMetaDataFileName(
-			this.generateMetaDataFileName(file)
+			this.generateMetaDataFileName(file),
+			this.plugin.settings.folder
 		);
-		const metaDataFilePath = `${this.plugin.settings.folder}/${metaDataFileName}`;
+		const metaDataFilePath = normalizePath(
+			`${this.plugin.settings.folder}/${metaDataFileName}`
+		);
 
-		await this.createMetaDataFile(metaDataFilePath, file as TFile);
+		await this.createMetaDataFile(metaDataFilePath, file);
+		return metaDataFilePath;
 	}
 
 	private generateMetaDataFileName(file: TFile): string {
+		// When syncFileNames is ON, use simple format; otherwise use custom format
+		const format = this.plugin.settings.syncFileNames
+			? '{{NAME}}.{{EXTENSION}}'
+			: this.plugin.settings.filenameFormat;
 		const metaDataFileName = `${this.plugin.formatter.format(
-			this.plugin.settings.filenameFormat,
+			format,
 			file.path,
 			file.stat.ctime
 		)}.md`;
 		return metaDataFileName;
 	}
 
-	private uniquefyMetaDataFileName(metaDataFileName: string): string {
-		const metaDataFilePath = normalizePath(
-			`${this.plugin.settings.folder}/${metaDataFileName}`
-		);
-		if (this.app.vault.getAbstractFileByPath(metaDataFilePath)) {
-			return `CONFLICT-${moment().format(
-				'YYYY-MM-DD-hh-mm-ss'
-			)}-${metaDataFileName}`;
-		} else {
+	private uniquefyMetaDataFileName(
+		metaDataFileName: string,
+		folder: string
+	): string {
+		let candidateFileName = metaDataFileName;
+		let candidatePath = normalizePath(`${folder}/${candidateFileName}`);
+
+		// If the base name doesn't exist, return it
+		if (!this.app.vault.getAbstractFileByPath(candidatePath)) {
 			return metaDataFileName;
 		}
+
+		// Otherwise, try appending numbers until we find an available name
+		const baseName = metaDataFileName.replace(/\.md$/, '');
+		let counter = 1;
+
+		while (this.app.vault.getAbstractFileByPath(candidatePath)) {
+			candidateFileName = `${baseName} ${counter}.md`;
+			candidatePath = normalizePath(`${folder}/${candidateFileName}`);
+			counter++;
+		}
+
+		return candidateFileName;
 	}
 
 	private async createMetaDataFile(
@@ -88,7 +109,7 @@ export class MetaDataGenerator {
 		// process by Templater
 		const templaterPlugin = await this.getTemplaterPlugin();
 		if (!(this.plugin.settings.useTemplater && templaterPlugin)) {
-			this.app.vault.create(
+			await this.app.vault.create(
 				metaDataFilePath,
 				this.plugin.formatter.format(
 					templateContent,
@@ -103,9 +124,19 @@ export class MetaDataGenerator {
 			);
 
 			try {
-				// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-				// @ts-ignore
-				const content = await templaterPlugin.templater.parse_template(
+				const content = await (
+					templaterPlugin as unknown as {
+						templater: {
+							parse_template: (
+								config: {
+									target_file: TFile;
+									run_mode: number;
+								},
+								template: string
+							) => Promise<string>;
+						};
+					}
+				).templater.parse_template(
 					{ target_file: targetFile, run_mode: 4 },
 					this.plugin.formatter.format(
 						templateContent,
@@ -113,10 +144,10 @@ export class MetaDataGenerator {
 						binaryFile.stat.ctime
 					)
 				);
-				this.app.vault.modify(targetFile, content);
-			} catch (err) {
+				await this.app.vault.modify(targetFile, content);
+			} catch (err: unknown) {
 				new Notice(
-					'ERROR in Binary File Manager Plugin: failed to connect to Templater. Your Templater version may not be supported'
+					'ERROR in Attachment Notes Plugin: failed to connect to Templater. Your Templater version may not be supported'
 				);
 				console.log(err);
 			}
@@ -157,29 +188,5 @@ export class MetaDataGenerator {
 			TIMEOUT_MILLISECOND,
 			RETRY_NUMBER
 		);
-	}
-
-	findUnlinkedBinaries(): TFile[] {
-		const unlinkedBinaries: TFile[] = [];
-		const linkedPaths = new Set<string>();
-
-		// collect all link destinations
-		Object.values(this.app.metadataCache.resolvedLinks).forEach((links) => {
-			Object.keys(links).forEach((dest) => {
-				linkedPaths.add(dest);
-			});
-		});
-
-		// collect only unlinked binaries
-		this.app.vault.getFiles().forEach((file) => {
-			const isUnlinkedBinary =
-				!linkedPaths.has(file.path) &&
-				this.plugin.fileExtensionManager.verify(file.path);
-			if (isUnlinkedBinary) {
-				unlinkedBinaries.push(file);
-			}
-		});
-
-		return unlinkedBinaries;
 	}
 }

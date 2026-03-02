@@ -3,6 +3,15 @@
 import { App, ISuggestOwner, Scope } from 'obsidian';
 import { createPopper, Instance as PopperInstance } from '@popperjs/core';
 
+// Obsidian internal APIs not exposed in public types
+interface ObsidianInternals {
+	dom: { appContainerEl: HTMLElement };
+	keymap: {
+		pushScope: (scope: Scope) => void;
+		popScope: (scope: Scope) => void;
+	};
+}
+
 const wrapAround = (value: number, size: number): number => {
 	return ((value % size) + size) % size;
 };
@@ -25,14 +34,17 @@ class Suggest<T> {
 		containerEl.on(
 			'click',
 			'.suggestion-item',
+			// @ts-expect-error - Event handler type mismatch
 			this.onSuggestionClick.bind(this)
 		);
 		containerEl.on(
 			'mousemove',
 			'.suggestion-item',
+			// @ts-expect-error - Event handler type mismatch
 			this.onSuggestionMouseover.bind(this)
 		);
 
+		// @ts-expect-error - Not all code paths return a value
 		scope.register([], 'ArrowUp', (event) => {
 			if (!event.isComposing) {
 				this.setSelectedItem(this.selectedItem - 1, true);
@@ -40,6 +52,7 @@ class Suggest<T> {
 			}
 		});
 
+		// @ts-expect-error - Not all code paths return a value
 		scope.register([], 'ArrowDown', (event) => {
 			if (!event.isComposing) {
 				this.setSelectedItem(this.selectedItem + 1, true);
@@ -47,6 +60,7 @@ class Suggest<T> {
 			}
 		});
 
+		// @ts-expect-error - Not all code paths return a value
 		scope.register([], 'Enter', (event) => {
 			if (!event.isComposing) {
 				this.useSelectedItem(event);
@@ -104,6 +118,7 @@ class Suggest<T> {
 		this.selectedItem = normalizedIndex;
 
 		if (scrollIntoView) {
+			// @ts-expect-error - selectedSuggestion possibly undefined
 			selectedSuggestion.scrollIntoView(false);
 		}
 	}
@@ -152,16 +167,17 @@ export abstract class TextInputSuggest<T> implements ISuggestOwner<T> {
 
 		if (suggestions.length > 0) {
 			this.suggest.setSuggestions(suggestions);
-			// eslint-disable-next-line @typescript-eslint/no-explicit-any
-			this.open((<any>this.app).dom.appContainerEl, this.inputEl);
+			this.open(
+				(this.app as unknown as ObsidianInternals).dom.appContainerEl,
+				this.inputEl
+			);
 		} else {
 			this.close();
 		}
 	}
 
 	open(container: HTMLElement, inputEl: HTMLElement): void {
-		// eslint-disable-next-line @typescript-eslint/no-explicit-any
-		(<any>this.app).keymap.pushScope(this.scope);
+		(this.app as unknown as ObsidianInternals).keymap.pushScope(this.scope);
 
 		container.appendChild(this.suggestEl);
 		this.popper = createPopper(inputEl, this.suggestEl, {
@@ -176,11 +192,13 @@ export abstract class TextInputSuggest<T> implements ISuggestOwner<T> {
 						// second pass - position it with the width bound to the reference element
 						// we need to early exit to avoid an infinite loop
 						const targetWidth = `${state.rects.reference.width}px`;
+						// @ts-expect-error - state.styles.popper possibly undefined and index signature access
 						if (state.styles.popper.width === targetWidth) {
 							return;
 						}
+						// @ts-expect-error - state.styles.popper possibly undefined and index signature access
 						state.styles.popper.width = targetWidth;
-						instance.update();
+						void instance.update();
 					},
 					phase: 'beforeWrite',
 					requires: ['computeStyles'],
@@ -190,8 +208,7 @@ export abstract class TextInputSuggest<T> implements ISuggestOwner<T> {
 	}
 
 	close(): void {
-		// eslint-disable-next-line @typescript-eslint/no-explicit-any
-		(<any>this.app).keymap.popScope(this.scope);
+		(this.app as unknown as ObsidianInternals).keymap.popScope(this.scope);
 
 		this.suggest.setSuggestions([]);
 		if (this.popper) this.popper.destroy();

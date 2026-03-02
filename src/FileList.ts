@@ -1,22 +1,20 @@
-import BinaryFileManagerPlugin from 'main';
-import { App, normalizePath } from 'obsidian';
+import AttachmentNotesPlugin from 'main';
+import { App, TFile } from 'obsidian';
 
-const PLUGIN_NAME = 'obsidian-binary-file-manager-plugin';
-const REGISTERED_BINARY_FILE_STORAGE_FILE_NAME =
-	'.binary-file-manager_binary-file-list.txt';
+interface SerializedRelationships {
+	pairs: Array<{ binary: string; metadata: string }>;
+}
 
 export class FileListAdapter {
 	private app: App;
-	private plugin: BinaryFileManagerPlugin;
-	private registeredBinaryFilePaths: Set<string>;
+	private plugin: AttachmentNotesPlugin;
+	private registeredBinaryFiles: Map<TFile, TFile>;
+	private saveTimeout: ReturnType<typeof setTimeout> | null = null;
 
-	constructor(app: App, plugin: BinaryFileManagerPlugin) {
+	constructor(app: App, plugin: AttachmentNotesPlugin) {
 		this.app = app;
 		this.plugin = plugin;
-		this.registeredBinaryFilePaths = new Set<string>();
-		this.app.workspace.onLayoutReady(async () => {
-			this.deleteNonExistingBinaryFiles();
-		});
+		this.registeredBinaryFiles = new Map<TFile, TFile>();
 	}
 
 	async load(): Promise<FileListAdapter> {
@@ -25,62 +23,168 @@ export class FileListAdapter {
 	}
 
 	async save() {
+		if (this.saveTimeout) {
+			clearTimeout(this.saveTimeout);
+			this.saveTimeout = null;
+		}
 		await this.saveBinaryFiles();
 	}
 
-	add(filepath: string): void {
-		this.registeredBinaryFilePaths.add(filepath);
+	private queueSave() {
+		if (this.saveTimeout) {
+			clearTimeout(this.saveTimeout);
+		}
+		this.saveTimeout = setTimeout(() => {
+			this.saveTimeout = null;
+			void this.saveBinaryFiles();
+		}, 500);
 	}
 
-	delete(filepath: string): void {
-		this.registeredBinaryFilePaths.delete(filepath);
+	add(binaryFile: TFile, metadataFile: TFile): void {
+		this.registeredBinaryFiles.set(binaryFile, metadataFile);
 	}
 
-	has(filepath: string): boolean {
-		return this.registeredBinaryFilePaths.has(filepath);
+	delete(binaryFile: TFile): TFile | undefined {
+		const metadataFile = this.registeredBinaryFiles.get(binaryFile);
+		this.registeredBinaryFiles.delete(binaryFile);
+		return metadataFile;
+	}
+
+	has(binaryFile: TFile): boolean {
+		if (!this.registeredBinaryFiles.has(binaryFile)) {
+			return false;
+		}
+		if (!this.validatePair(binaryFile)) {
+			return false;
+		}
+		return true;
+	}
+
+	get(binaryFile: TFile): TFile | undefined {
+		const metadataFile = this.registeredBinaryFiles.get(binaryFile);
+		if (!metadataFile) {
+			return undefined;
+		}
+		if (!this.validatePair(binaryFile)) {
+			return undefined;
+		}
+		return metadataFile;
+	}
+
+	getByMetadata(metadataFile: TFile): TFile | undefined {
+		for (const [binary, metadata] of this.registeredBinaryFiles.entries()) {
+			if (metadata === metadataFile) {
+				if (!this.validatePair(binary)) {
+					return undefined;
+				}
+				return binary;
+			}
+		}
+		return undefined;
+	}
+
+	getAllPairs(): Map<TFile, TFile> {
+		return new Map(this.registeredBinaryFiles);
 	}
 
 	deleteAll(): void {
-		this.registeredBinaryFilePaths = new Set<string>();
+		this.registeredBinaryFiles = new Map<TFile, TFile>();
+	}
+
+	findOrphans(metadataFolder: string, minAgeDays?: number): TFile[] {
+		// Get all markdown files in the metadata folder
+		const normalizedFolder = metadataFolder === '/' ? '' : metadataFolder;
+		const allMetadataFiles = this.app.vault
+			.getMarkdownFiles()
+			.filter(
+				(f) =>
+					normalizedFolder === '' ||
+					f.path.startsWith(normalizedFolder + '/') ||
+					f.parent?.path === normalizedFolder
+			);
+
+		// Get set of tracked metadata paths
+		const trackedMetadata = new Set(
+			Array.from(this.registeredBinaryFiles.values()).map((m) => m.path)
+		);
+
+		// Find orphans (metadata not tracked)
+		let orphans = allMetadataFiles.filter(
+			(f) => !trackedMetadata.has(f.path)
+		);
+
+		// Apply age filter if specified
+		if (minAgeDays !== undefined) {
+			const minAgeMs = minAgeDays * 24 * 60 * 60 * 1000;
+			const now = Date.now();
+			orphans = orphans.filter((f) => now - f.stat.ctime > minAgeMs);
+		}
+
+		return orphans;
+	}
+
+	private validatePair(binaryFile: TFile): boolean {
+		const metadataFile = this.registeredBinaryFiles.get(binaryFile);
+		if (!metadataFile) {
+			return false;
+		}
+
+		const existingFiles = this.app.vault.getFiles();
+		const binaryExists = existingFiles.includes(binaryFile);
+		const metadataExists = existingFiles.includes(metadataFile);
+
+		if (!binaryExists || !metadataExists) {
+			this.registeredBinaryFiles.delete(binaryFile);
+			this.queueSave();
+			return false;
+		}
+
+		return true;
 	}
 
 	private async loadBinaryFiles() {
-		const configDir = this.app.vault.configDir;
-		const storageFilePath = normalizePath(
-			`${configDir}/plugins/${PLUGIN_NAME}/${REGISTERED_BINARY_FILE_STORAGE_FILE_NAME}`
-		);
+		const data =
+			(await this.plugin.loadData()) as SerializedRelationships | null;
 
-		if (!(await this.app.vault.adapter.exists(storageFilePath))) {
-			this.registeredBinaryFilePaths = new Set<string>();
+		if (!data || !data.pairs) {
+			this.registeredBinaryFiles = new Map<TFile, TFile>();
 			return;
 		}
 
-		const binaryFiles = (await this.app.vault.adapter.read(storageFilePath))
-			.trim()
-			.split(/\r?\n/);
-		this.registeredBinaryFilePaths = new Set<string>(binaryFiles);
+		this.registeredBinaryFiles = new Map<TFile, TFile>();
+
+		for (const pair of data.pairs) {
+			const binaryFile = this.app.vault.getAbstractFileByPath(
+				pair.binary
+			);
+			const metadataFile = this.app.vault.getAbstractFileByPath(
+				pair.metadata
+			);
+
+			if (binaryFile instanceof TFile && metadataFile instanceof TFile) {
+				this.registeredBinaryFiles.set(binaryFile, metadataFile);
+			}
+		}
 	}
 
 	private async saveBinaryFiles() {
-		const configDir = this.app.vault.configDir;
-		const storageFilePath = normalizePath(
-			`${configDir}/plugins/${PLUGIN_NAME}/${REGISTERED_BINARY_FILE_STORAGE_FILE_NAME}`
+		// Load existing data to preserve settings
+		const existingData =
+			((await this.plugin.loadData()) as Record<string, unknown>) || {};
+
+		const pairs = Array.from(this.registeredBinaryFiles.entries()).map(
+			([binaryFile, metadataFile]) => ({
+				binary: binaryFile.path,
+				metadata: metadataFile.path,
+			})
 		);
 
-		await this.app.vault.adapter.write(
-			storageFilePath,
-			Array.from(this.registeredBinaryFilePaths).join('\n')
-		);
-	}
+		// Merge pairs with existing data (preserving settings)
+		const mergedData = {
+			...existingData,
+			pairs,
+		};
 
-	private async deleteNonExistingBinaryFiles() {
-		const difference = new Set(this.registeredBinaryFilePaths);
-		for (const file of this.app.vault.getFiles()) {
-			difference.delete(file.path);
-		}
-		for (const fileToBeUnregistered of difference) {
-			this.registeredBinaryFilePaths.delete(fileToBeUnregistered);
-		}
-		await this.saveBinaryFiles();
+		await this.plugin.saveData(mergedData);
 	}
 }

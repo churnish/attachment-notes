@@ -1,10 +1,10 @@
-import BinaryFileManagerPlugin from 'main';
+import AttachmentNotesPlugin from 'main';
 
 export class FileExtensionManager {
-	private plugin: BinaryFileManagerPlugin;
+	private plugin: AttachmentNotesPlugin;
 	private extensions: Set<string>;
 
-	constructor(plugin: BinaryFileManagerPlugin) {
+	constructor(plugin: AttachmentNotesPlugin) {
 		this.plugin = plugin;
 		this.extensions = new Set<string>(this.plugin.settings.extensions);
 	}

@@ -1,4 +1,4 @@
-import BinaryFileManagerPlugin from 'main';
+import AttachmentNotesPlugin from 'main';
 import { App, moment } from 'obsidian';
 const DATE_REGEXP = /{{CDATE:([^}\n\r]*)}}/g;
 const NAME_REGEX = /{{NAME(((:UP)|(:LOW))?)}}/g;
@@ -11,9 +11,9 @@ const EMBED_SYNTAX = '{{EMBED}}';
 
 export class Formatter {
 	app: App;
-	plugin: BinaryFileManagerPlugin;
+	plugin: AttachmentNotesPlugin;
 
-	constructor(app: App, plugin: BinaryFileManagerPlugin) {
+	constructor(app: App, plugin: AttachmentNotesPlugin) {
 		this.app = app;
 		this.plugin = plugin;
 	}

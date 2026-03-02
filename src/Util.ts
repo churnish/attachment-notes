@@ -5,8 +5,8 @@ export async function retry<T>(
 	check: (_value: T) => boolean = (_: T) => true
 ): Promise<T | undefined> {
 	if (!Number.isInteger(trials)) {
-		throw `arg trials: ${trials} is not an integer
-		`;
+		throw new Error(`arg trials: ${trials} is not an integer
+		`);
 	}
 	const result = await Promise.race([
 		delay(timeoutMilliSecond),
@@ -33,25 +33,30 @@ async function delay(milliSecond: number): Promise<undefined> {
 	return undefined;
 }
 
-const INVALID_CHARS_IN_FILE_NAME = new Set<string>([
+// Core Obsidian restrictions (all platforms)
+// Note: *"<>? are only unsafe on Windows/Android - users can use them if they want
+const INVALID_FILE_NAME_CHARS = new Set<string>([
+	'[',
+	']',
+	'#',
+	'^',
+	'|',
 	'\\',
 	'/',
 	':',
-	'*',
-	'?',
-	'"',
-	'<',
-	'>',
-	'|',
 ]);
 
 export function validFileName(fileName: string): {
 	valid: boolean;
-	included?: string;
+	reason?: string;
 } {
+	if (fileName.startsWith('.')) {
+		return { valid: false, reason: 'File name must not start with a dot' };
+	}
+
 	for (const char of fileName) {
-		if (INVALID_CHARS_IN_FILE_NAME.has(char)) {
-			return { valid: false, included: char };
+		if (INVALID_FILE_NAME_CHARS.has(char)) {
+			return { valid: false, reason: `"${char}" must not be included` };
 		}
 	}
 
