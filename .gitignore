@@ -3,6 +3,8 @@
 node_modules/
 node_modules.nosync/
 
+* 2
+* 2.*
 *.map
 
 .attachment-notes_binary-file-list.txt
