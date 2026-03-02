@@ -42,7 +42,7 @@
 		"project": ["src/**/*.ts"],
 		"ignore": [],
 		"ignoreDependencies": ["eslint", "npm-run-all", "prettier"],
-		"ignoreBinaries": ["prettier", "run-s", "eslint", "run-p", "tsc", "knip"],
+		"ignoreBinaries": ["eslint", "knip", "prettier", "run-p", "run-s", "tsc"],
 		"ignoreExportsUsedInFile": true
 	}
 }
