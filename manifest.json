@@ -3,7 +3,7 @@
 	"name": "Attachment Notes",
 	"minAppVersion": "1.11.0",
 	"description": "Create metadata notes for attachments automatically.",
-	"author": "greetclammy",
+	"author": "churnish",
 	"isDesktopOnly": false,
 	"version": "0.1.0"
 }

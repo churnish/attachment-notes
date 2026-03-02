@@ -20,7 +20,7 @@
 		"postversion": "git push origin main --follow-tags --force-with-lease"
 	},
 	"keywords": [],
-	"author": "qawatake",
+	"author": "churnish",
 	"license": "MIT",
 	"devDependencies": {
 		"@eslint/js": "^9.39.2",
