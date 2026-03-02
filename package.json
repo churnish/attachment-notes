@@ -38,6 +38,8 @@
 		"@popperjs/core": "^2.11.0"
 	},
 	"knip": {
+		"entry": ["src/main.ts"],
+		"project": ["src/**/*.ts"],
 		"ignore": [],
 		"ignoreDependencies": ["eslint", "npm-run-all", "prettier"],
 		"ignoreBinaries": ["prettier", "run-s", "eslint", "run-p", "tsc", "knip"],
