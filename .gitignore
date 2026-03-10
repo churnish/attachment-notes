@@ -1,15 +1,15 @@
-.devcontainer/
+* [0-9]
+* [0-9].*
+
+.claude/
 .vscode/
 node_modules/
-node_modules.nosync/
 
-* 2
-* 2.*
 *.map
+*.zip
 
 .attachment-notes_binary-file-list.txt
 .DS_Store
 data.json
-Dockerfile
 main.js
 package-lock.json
